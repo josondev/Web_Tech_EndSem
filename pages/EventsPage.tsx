@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Event, ScrapedEvent, User } from '../types';
 import { PlusIcon, SearchIcon, PencilIcon, TrashIcon, CalendarIcon, LocationMarkerIcon } from '../components/icons';
-import { scrapeEventsByLocation } from '../services/geminiService';
+import { scrapeEventsByLocation } from '../services/apiService';
 
 interface EventsPageProps {
   userEvents: Event[];

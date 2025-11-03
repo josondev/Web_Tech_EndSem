@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Event, Task } from '../types';
-import { getEventSuggestions } from '../services/geminiService';
+import { getEventSuggestions } from '../services/apiService';
 import { SparklesIcon, PlusIcon } from './icons';
 
 interface EventFormModalProps {

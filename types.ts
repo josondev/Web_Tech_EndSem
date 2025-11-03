@@ -46,3 +46,9 @@ export interface ScrapedEvent {
   location: string;
   description: string;
 }
+
+// FIX: Added missing AISuggestions interface.
+export interface AISuggestions {
+  suggestedDescription: string;
+  suggestedTasks: string[];
+}

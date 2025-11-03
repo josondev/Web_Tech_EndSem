@@ -20,9 +20,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onLogin, onSignUp }) => {
   
   useEffect(() => {
     const checkUsers = async () => {
-        const users = await api.getUsers();
-        setHasUsers(users.length > 0);
-        if (users.length === 0) {
+        const anyUsers = await api.checkUsersExist();
+        setHasUsers(anyUsers);
+        if (!anyUsers) {
             setIsSigningUp(true);
         }
     };

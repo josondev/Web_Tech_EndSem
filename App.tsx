@@ -18,17 +18,15 @@ type Page = 'Dashboard' | 'Events' | 'Calendar' | 'My Tickets' | 'AI Suggestions
 
 const App: React.FC = () => {
   const [userEvents, setUserEvents] = useState<Event[]>([]);
-  const [allEvents, setAllEvents] = useState<Event[]>([]);
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('currentUser');
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [eventToEdit, setEventToEdit] = useState<Event | null>(null);
   const [appStarted, setAppStarted] = useState(false);
+  
   const [publicEventId, setPublicEventId] = useState<string | null>(null);
+  const [publicEventData, setPublicEventData] = useState<Event | undefined>(undefined);
 
   const [activePage, setActivePage] = useState<Page>('Dashboard');
 
@@ -37,33 +35,49 @@ const App: React.FC = () => {
   const [isRegistering, setIsRegistering] = useState(false);
   
   useEffect(() => {
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
-  }, [currentUser]);
-
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const eventId = params.get('event');
-    
-    const loadInitialData = async () => {
+    if (eventId) {
+      setPublicEventId(eventId);
+    }
+
+    const checkAuth = async () => {
       setIsLoading(true);
-      const allEventsData = await api.getAllEvents();
-      setAllEvents(allEventsData); // Needed for public page and My Tickets
-      if (eventId) {
-        setPublicEventId(eventId);
-      }
+      const user = await api.getCurrentUser();
+      setCurrentUser(user);
       setIsLoading(false);
     };
 
-    loadInitialData();
+    if (!eventId) { // Don't check auth if viewing a public page
+        checkAuth();
+    } else {
+        setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    const fetchPublicEvent = async () => {
+      if(publicEventId) {
+        setIsLoading(true);
+        try {
+          const event = await api.getPublicEventById(publicEventId);
+          setPublicEventData(event);
+        } catch (error) {
+          console.error("Failed to fetch public event", error);
+          setPublicEventData(undefined);
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    fetchPublicEvent();
+  }, [publicEventId]);
   
   useEffect(() => {
       const fetchEvents = async () => {
           if (currentUser) {
               setIsLoading(true);
-              const events = currentUser.role === 'admin' 
-                  ? await api.getAllEvents() 
-                  : await api.getEventsForUser(currentUser.id);
+              const events = await api.getEventsForUser();
               setUserEvents(events);
               setIsLoading(false);
           } else {
@@ -95,7 +109,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+    localStorage.removeItem('authToken');
     setAppStarted(false);
     setActivePage('Dashboard');
   };
@@ -113,7 +127,8 @@ const App: React.FC = () => {
   const handleSaveEvent = async (eventData: Omit<Event, 'id' | 'guests' | 'tasks' | 'userId'> & { id?: string; tasks?: Task[], isPublic: boolean }) => {
     if (!currentUser) return;
     
-    const payload = { ...eventData, userId: currentUser.id };
+    // Backend will use token to set userId
+    const payload = { ...eventData };
     const savedEvent = await api.saveEvent(payload);
 
     if (eventData.id) {
@@ -138,7 +153,7 @@ const App: React.FC = () => {
   const handleConfirmRegistration = async () => {
       if (!eventToRegister || !currentUser) return;
       setIsRegistering(true);
-      const newEvent = await api.registerForPublicEvent(currentUser.id, eventToRegister);
+      const newEvent = await api.registerForPublicEvent(eventToRegister);
       setUserEvents(prev => [...prev, newEvent]);
       setIsRegistering(false);
       handleCloseRegisterModal();
@@ -183,13 +198,12 @@ const App: React.FC = () => {
     setUserEvents(prev => prev.filter(e => e.id !== eventId));
   };
   
-  if (isLoading && !currentUser && !publicEventId) {
+  if (isLoading) {
     return <div className="min-h-screen bg-gray-900 flex items-center justify-center"><div className="animate-spin rounded-full h-16 w-16 border-b-2 border-teal-500"></div></div>
   }
 
   if (publicEventId) {
-    const event = allEvents.find(e => e.id === publicEventId);
-    return <PublicEventPage event={event} onRegister={handlePublicRegister} />;
+    return <PublicEventPage event={publicEventData} onRegister={handlePublicRegister} />;
   }
 
   if (!appStarted) return <LandingPage onStart={handleStartApp} />;
@@ -210,7 +224,7 @@ const App: React.FC = () => {
         }}
         />;
       case 'My Tickets':
-        return <MyTicketsPage allEvents={allEvents} currentUser={currentUser} />;
+        return <MyTicketsPage />;
       case 'AI Suggestions':
         return <AISuggestionsPage />;
       default:

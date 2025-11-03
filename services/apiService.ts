@@ -1,244 +1,233 @@
-import { Event, User, Guest, Task, RSVPStatus, ScrapedEvent } from '../types';
+import { Event, User, Guest, Task, RSVPStatus, ScrapedEvent, AISuggestions } from '../types';
 
-// --- Helper Functions for localStorage ---
+// --- Real API Service ---
 
-const getFromStorage = <T,>(key: string, defaultValue: T): T => {
-  try {
-    const item = window.localStorage.getItem(key);
-    return item ? JSON.parse(item) : defaultValue;
-  } catch (error) {
-    console.error(`Error reading from localStorage key “${key}”:`, error);
-    return defaultValue;
-  }
+const BASE_URL = '/api'; // This would be your backend server URL
+
+const getAuthToken = (): string | null => {
+  return localStorage.getItem('authToken');
 };
 
-const saveToStorage = <T,>(key: string, value: T) => {
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.error(`Error writing to localStorage key “${key}”:`, error);
+// Helper for making authenticated requests
+const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
+
+  const response = await fetch(url, { ...options, headers });
+
+  if (response.status === 401) {
+    localStorage.removeItem('authToken');
+    window.location.reload();
+    throw new Error('Unauthorized');
+  }
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: 'An unknown error occurred.' }));
+    throw new Error(errorData.message || 'API request failed');
+  }
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  return response.json();
 };
-
-const simulateDelay = (delay = 400) => new Promise(res => setTimeout(res, delay));
-
-// --- API Functions ---
-
-const getUserById = (userId: string): User | undefined => {
-    const users = getFromStorage<User[]>('users', []);
-    return users.find(u => u.id === userId);
-}
 
 // --- User Authentication ---
 
-export const signupUser = async (userData: Omit<User, 'id' | 'role'>): Promise<{ user?: User; error?: string }> => {
-  await simulateDelay();
-  const users = getFromStorage<User[]>('users', []);
-  
-  if (users.some(u => u.email === userData.email)) {
-    return { error: "An account with this email already exists." };
+export const signupUser = async (userData: Omit<User, 'id' | 'role'>): Promise<{ user?: User; token?: string; error?: string }> => {
+  try {
+    const response = await fetch(`${BASE_URL}/users/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return { error: data.message || 'Signup failed.' };
+    }
+    localStorage.setItem('authToken', data.token);
+    return { user: data.user, token: data.token };
+  } catch (error: any) {
+    return { error: error.message };
   }
-  
-  const role = users.length === 0 ? 'admin' : 'user';
-  const newUser: User = { ...userData, id: `user-${Date.now()}`, role };
-  const updatedUsers = [...users, newUser];
-  saveToStorage('users', updatedUsers);
-  
-  return { user: newUser };
 };
 
-export const loginUser = async (credentials: Pick<User, 'email' | 'password'>): Promise<{ user?: User; error?: string }> => {
-  await simulateDelay();
-  const users = getFromStorage<User[]>('users', []);
-  
-  if (users.length === 0) {
-    return { error: "No accounts found. Please sign up." };
+export const loginUser = async (credentials: Pick<User, 'email' | 'password'>): Promise<{ user?: User; token?: string; error?: string }> => {
+  try {
+    const response = await fetch(`${BASE_URL}/users/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credentials),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      return { error: data.message || 'Invalid email or password.' };
+    }
+    localStorage.setItem('authToken', data.token);
+    return { user: data.user, token: data.token };
+  } catch (error: any) {
+    return { error: error.message };
   }
-  
-  const user = users.find(u => u.email === credentials.email && u.password === credentials.password);
+};
 
-  if (!user) {
-    return { error: "Invalid email or password." };
-  }
-
-  return { user };
+export const getCurrentUser = async (): Promise<User | null> => {
+    const token = getAuthToken();
+    if (!token) return null;
+    try {
+        return await fetchWithAuth(`${BASE_URL}/users/me`);
+    } catch (error) {
+        console.error("Failed to fetch current user:", error);
+        return null;
+    }
 };
 
 export const getUsers = async(): Promise<User[]> => {
-    await simulateDelay(100);
-    return getFromStorage<User[]>('users', []);
+    return fetchWithAuth(`${BASE_URL}/users`);
 }
 
+export const checkUsersExist = async (): Promise<boolean> => {
+    try {
+        const response = await fetch(`${BASE_URL}/users/exists`);
+        const data = await response.json();
+        return data.exists;
+    } catch {
+        return true; 
+    }
+};
 
 // --- Event Management ---
 
-export const getEventsForUser = async (userId: string): Promise<Event[]> => {
-    await simulateDelay();
-    const allEvents = getFromStorage<Event[]>('events', []);
-    return allEvents.filter(event => event.userId === userId);
+export const getEventsForUser = async (): Promise<Event[]> => {
+    return fetchWithAuth(`${BASE_URL}/events`);
 };
 
 export const getAllEvents = async (): Promise<Event[]> => {
-    await simulateDelay();
-    const allEvents = getFromStorage<Event[]>('events', []);
-    const allUsers = getFromStorage<User[]>('users', []);
-    const userMap = new Map(allUsers.map(u => [u.id, u.name]));
-    
-    return allEvents.map(event => ({
-        ...event,
-        userName: userMap.get(event.userId) || 'Unknown User'
-    }));
+    return fetchWithAuth(`${BASE_URL}/events/all`);
+};
+
+export const getMyTickets = async (): Promise<Event[]> => {
+    return fetchWithAuth(`${BASE_URL}/users/me/tickets`);
+};
+
+export const getPublicEventById = async (eventId: string): Promise<Event> => {
+    const response = await fetch(`${BASE_URL}/events/public/${eventId}`);
+    if(!response.ok) throw new Error("Public event not found");
+    return response.json();
 }
 
-export const saveEvent = async (eventData: Omit<Event, 'id' | 'guests' | 'tasks'> & { id?: string; guests?: Guest[]; tasks?: Task[] }): Promise<Event> => {
-    await simulateDelay();
-    const allEvents = getFromStorage<Event[]>('events', []);
+export const saveEvent = async (eventData: Omit<Event, 'id' | 'guests' | 'tasks' | 'userId'> & { id?: string; guests?: Guest[]; tasks?: Task[] }): Promise<Event> => {
     if (eventData.id) {
-        // Update existing event
-        let updatedEvent: Event | undefined;
-        const updatedEvents = allEvents.map(e => {
-            if (e.id === eventData.id) {
-                updatedEvent = { ...e, ...eventData };
-                return updatedEvent;
-            }
-            return e;
+        return fetchWithAuth(`${BASE_URL}/events/${eventData.id}`, {
+            method: 'PUT',
+            body: JSON.stringify(eventData)
         });
-        saveToStorage('events', updatedEvents);
-        if (!updatedEvent) throw new Error("Event not found for update");
-        return updatedEvent;
     } else {
-        // Create new event
-        const newEvent: Event = {
-            ...eventData,
-            id: `event-${Date.now()}`,
-            guests: eventData.guests || [],
-            tasks: eventData.tasks || [],
-        };
-        const updatedEvents = [...allEvents, newEvent];
-        saveToStorage('events', updatedEvents);
-        return newEvent;
+        return fetchWithAuth(`${BASE_URL}/events`, {
+            method: 'POST',
+            body: JSON.stringify(eventData)
+        });
     }
 };
 
 export const deleteEvent = async (eventId: string): Promise<{ success: boolean }> => {
-    await simulateDelay();
-    let allEvents = getFromStorage<Event[]>('events', []);
-    allEvents = allEvents.filter(e => e.id !== eventId);
-    saveToStorage('events', allEvents);
+    await fetchWithAuth(`${BASE_URL}/events/${eventId}`, { method: 'DELETE' });
     return { success: true };
 };
 
-export const registerForPublicEvent = async (userId: string, eventData: ScrapedEvent): Promise<Event> => {
-    const user = getUserById(userId);
-    if (!user) {
-        throw new Error("User not found for registration");
-    }
-
-    const newGuest: Guest = {
-        id: `guest-${Date.now()}`,
-        name: user.name,
-        email: user.email,
-        status: RSVPStatus.Attending,
-    };
-
-    const newEventForUser: Omit<Event, 'id'> = {
-        name: eventData.name,
-        date: new Date(eventData.date).toISOString().split('T')[0],
-        time: "00:00",
-        location: eventData.location,
-        description: eventData.description,
-        guests: [newGuest],
-        tasks: [],
-        userId: userId,
-        isPublic: false,
-    };
-    
-    return saveEvent(newEventForUser);
-}
-
-// --- Guest & Task Management (within an event) ---
-
-const updateEventInStorage = (eventId: string, updateFn: (event: Event) => Event): Event | null => {
-    const allEvents = getFromStorage<Event[]>('events', []);
-    let updatedEvent: Event | null = null;
-    const updatedEvents = allEvents.map(e => {
-        if (e.id === eventId) {
-            updatedEvent = updateFn(e);
-            return updatedEvent;
-        }
-        return e;
+export const registerForPublicEvent = async (eventData: ScrapedEvent): Promise<Event> => {
+    return fetchWithAuth(`${BASE_URL}/events/register-scraped`, {
+        method: 'POST',
+        body: JSON.stringify(eventData),
     });
-    if (updatedEvent) {
-        saveToStorage('events', updatedEvents);
-    }
-    return updatedEvent;
-}
+};
+
+// --- Guest & Task Management ---
 
 export const addGuestToEvent = async (eventId: string, guestData: Omit<Guest, 'id'|'status'>): Promise<Guest> => {
-    await simulateDelay();
-    const newGuest: Guest = { ...guestData, id: `guest-${Date.now()}`, status: RSVPStatus.Pending };
-    const updatedEvent = updateEventInStorage(eventId, event => ({
-        ...event,
-        guests: [...event.guests, newGuest]
-    }));
-    if (!updatedEvent) throw new Error("Event not found to add guest");
-    return newGuest;
+    return fetchWithAuth(`${BASE_URL}/events/${eventId}/guests`, {
+        method: 'POST',
+        body: JSON.stringify(guestData),
+    });
 };
 
 export const publicRegisterToEvent = async (eventId: string, guestData: Omit<Guest, 'id'|'status'>): Promise<Guest> => {
-    await simulateDelay();
-    const newGuest: Guest = { ...guestData, id: `guest-${Date.now()}`, status: RSVPStatus.Attending };
-    const updatedEvent = updateEventInStorage(eventId, event => ({
-        ...event,
-        guests: [...event.guests, newGuest]
-    }));
-    if (!updatedEvent) throw new Error("Event not found to register guest");
-    return newGuest;
+    const response = await fetch(`${BASE_URL}/events/public/${eventId}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(guestData),
+    });
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Registration failed');
+    }
+    return response.json();
 };
 
-
 export const updateGuestStatus = async (eventId: string, guestId: string, status: RSVPStatus): Promise<{ success: boolean }> => {
-    await simulateDelay();
-    updateEventInStorage(eventId, event => ({
-        ...event,
-        guests: event.guests.map(g => g.id === guestId ? { ...g, status } : g)
-    }));
+    await fetchWithAuth(`${BASE_URL}/events/${eventId}/guests/${guestId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+    });
     return { success: true };
 };
 
 export const deleteGuestFromEvent = async (eventId: string, guestId: string): Promise<{ success: boolean }> => {
-    await simulateDelay();
-    updateEventInStorage(eventId, event => ({
-        ...event,
-        guests: event.guests.filter(g => g.id !== guestId)
-    }));
+    await fetchWithAuth(`${BASE_URL}/events/${eventId}/guests/${guestId}`, {
+        method: 'DELETE',
+    });
     return { success: true };
 };
 
 export const addTaskToEvent = async (eventId: string, taskData: Omit<Task, 'id'|'completed'>): Promise<Task> => {
-    await simulateDelay();
-    const newTask: Task = { ...taskData, id: `task-${Date.now()}`, completed: false };
-    updateEventInStorage(eventId, event => ({
-        ...event,
-        tasks: [...event.tasks, newTask]
-    }));
-    return newTask;
+    return fetchWithAuth(`${BASE_URL}/events/${eventId}/tasks`, {
+        method: 'POST',
+        body: JSON.stringify(taskData),
+    });
 };
 
 export const toggleTaskCompletion = async (eventId: string, taskId: string): Promise<{ success: boolean }> => {
-    await simulateDelay();
-    updateEventInStorage(eventId, event => ({
-        ...event,
-        tasks: event.tasks.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t)
-    }));
+    await fetchWithAuth(`${BASE_URL}/events/${eventId}/tasks/${taskId}/toggle`, {
+        method: 'PATCH',
+    });
     return { success: true };
 };
 
 export const deleteTaskFromEvent = async (eventId: string, taskId: string): Promise<{ success: boolean }> => {
-    await simulateDelay();
-    updateEventInStorage(eventId, event => ({
-        ...event,
-        tasks: event.tasks.filter(t => t.id !== taskId)
-    }));
+    await fetchWithAuth(`${BASE_URL}/events/${eventId}/tasks/${taskId}`, {
+        method: 'DELETE',
+    });
     return { success: true };
+};
+
+// --- AI Service Proxies ---
+
+export const getEventSuggestions = async (prompt: string): Promise<AISuggestions | null> => {
+    try {
+        return await fetchWithAuth(`${BASE_URL}/ai/suggestions`, {
+            method: 'POST',
+            body: JSON.stringify({ prompt }),
+        });
+    } catch (error) {
+        console.error("Error fetching AI suggestions:", error);
+        return null;
+    }
+};
+
+export const scrapeEventsByLocation = async (locationQuery: string): Promise<ScrapedEvent[] | null> => {
+    try {
+        return await fetchWithAuth(`${BASE_URL}/ai/scrape-events`, {
+            method: 'POST',
+            body: JSON.stringify({ locationQuery }),
+        });
+    } catch (error) {
+        console.error("Error scraping events:", error);
+        return null;
+    }
 };

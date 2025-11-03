@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { getEventSuggestions, AISuggestions } from '../services/geminiService';
+import { getEventSuggestions } from '../services/apiService';
+import { AISuggestions } from '../types';
 import { SparklesIcon } from '../components/icons';
 
 export const AISuggestionsPage: React.FC = () => {

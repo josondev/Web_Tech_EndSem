@@ -1,11 +1,9 @@
-import React from 'react';
-import { Event, User, RSVPStatus } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Event, RSVPStatus } from '../types';
+import * as api from '../services/apiService';
 import { CalendarIcon, LocationMarkerIcon, UsersIcon } from '../components/icons';
 
-interface MyTicketsPageProps {
-  allEvents: Event[];
-  currentUser: User;
-}
+interface MyTicketsPageProps {}
 
 const TicketCard: React.FC<{ event: Event }> = ({ event }) => {
     const formattedDate = new Date(event.date + 'T00:00:00').toLocaleDateString(undefined, {
@@ -40,10 +38,34 @@ const TicketCard: React.FC<{ event: Event }> = ({ event }) => {
     );
   };
 
-export const MyTicketsPage: React.FC<MyTicketsPageProps> = ({ allEvents, currentUser }) => {
-  const registeredEvents = allEvents.filter(event =>
-    event.guests.some(guest => guest.email === currentUser.email && guest.status === RSVPStatus.Attending)
-  );
+export const MyTicketsPage: React.FC<MyTicketsPageProps> = () => {
+  const [registeredEvents, setRegisteredEvents] = useState<Event[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchTickets = async () => {
+      setIsLoading(true);
+      try {
+        const events = await api.getMyTickets();
+        setRegisteredEvents(events);
+      } catch (error) {
+        console.error("Failed to fetch tickets:", error);
+        setRegisteredEvents([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchTickets();
+  }, []);
+
+  if (isLoading) {
+    return (
+        <div className="p-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-teal-500 mx-auto"></div>
+            <p className="mt-4 text-gray-400">Loading your tickets...</p>
+        </div>
+    );
+  }
 
   return (
     <div className="p-8">
